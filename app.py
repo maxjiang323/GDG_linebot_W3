@@ -26,6 +26,27 @@ firebase_admin.initialize_app(cred)
 db = firestore.client()
 ######################################################
 
+# Gemini 初始化
+api_key = os.getenv("GOOGLE_API_KEY")
+if api_key:
+    from google import genai as new_genai
+    client = new_genai.Client(api_key=api_key)
+    
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash", 
+            contents="Test message"
+        )
+        print("✅ 使用環境變數成功！")
+    except Exception as e:
+        print(f"❌ 失敗: {e}")
+else:
+    print("❌ 無法從環境變數讀取 API 金鑰")
+
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+model = genai.GenerativeModel("gemini-2.5-flash")
+
+
 # 從環境變數中讀取 LINE 的 Channel Access Token 和 Channel Secret
 line_token = os.getenv('LINE_TOKEN')
 line_secret = os.getenv('LINE_SECRET')
@@ -71,12 +92,30 @@ def handle_message(event: Event):
         user_message = event.message.text  # 使用者的訊息
         app.logger.info(f"收到的訊息: {user_message}")
 
-        # 存到 Firestore（範例結構: GDG/W3/records/{儲存訊息}）
-        ###################################################################
-        reply_text = "你說了：" + user_message
-        line_bot_api.reply_message(reply_token, TextSendMessage(text=reply_text))
+        # # 存到 Firestore（範例結構: GDG/W3/records/{儲存訊息}）
+        # ###################################################################
+        # reply_text = "你說了：" + user_message
+        # line_bot_api.reply_message(reply_token, TextSendMessage(text=reply_text))
             
-        doc_address = db.collection("GDG").document("W3")
+        # doc_address = db.collection("GDG").document("W3")
+        # doc = doc_address.get()
+        # if doc.exists:
+        #     doc_data = doc.to_dict()
+        #     history = doc_data.get("record", [])
+        # else:
+        #     history = []
+        # print(history)
+
+        # history.append(reply_text)
+
+        # doc_address.set({"record": history})
+        # ###################################################################
+
+
+        # 存到 Firestore（範例結構: GDG/W3_memory/records/{儲存訊息}）
+        ###################################################################
+
+        doc_address = db.collection("GDG").document("W3_memory")
         doc = doc_address.get()
         if doc.exists:
             doc_data = doc.to_dict()
@@ -84,11 +123,19 @@ def handle_message(event: Event):
         else:
             history = []
         print(history)
+        gemini_response = model.generate_content(f"之前談話歷史為{history}，請回答{user_message}")
+        gemini_response_text = gemini_response.text.strip()
 
-        history.append(reply_text)
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=gemini_response_text))
+
+        history.append({
+            "user": user_message,
+            "gemini_reply": gemini_response_text
+        })
 
         doc_address.set({"record": history})
         ###################################################################
+
 
 # 應用程序入口點
 if __name__ == "__main__":
